@@ -3,6 +3,28 @@ import numpy as np
 from collections import deque
 from .utils import perspective_matrices, warp, draw_lane_overlay, measure_vehicle_offset
 
+# Try to import simpleaudio for beep. If not present, LDW will be visual-only.
+try:
+    import simpleaudio as sa
+    SIMPLEAUDIO_AVAILABLE = True
+except Exception:
+    SIMPLEAUDIO_AVAILABLE = False
+
+def _play_beep(frequency=880, duration_ms=200, volume=0.3):
+    """Play a short beep (uses simpleaudio if available)."""
+    if not SIMPLEAUDIO_AVAILABLE:
+        return
+    fs = 44100
+    t = np.linspace(0, duration_ms/1000.0, int(fs * (duration_ms/1000.0)), False)
+    tone = np.sin(frequency * t * 2 * np.pi)
+    audio = tone * (2**15 - 1) * volume
+    audio = audio.astype(np.int16)
+    try:
+        play_obj = sa.play_buffer(audio, 1, 2, fs)
+        # don't block; let it play asynchronously
+    except Exception:
+        pass
+
 def combined_threshold(img):
     hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS)
     l_channel = hls[:,:,1]
@@ -64,10 +86,21 @@ def sliding_window_poly(binary_warped, nwindows=9, margin=100, minpix=50):
     return left_fitx, right_fitx, ploty
 
 class LaneProcessor:
-    def __init__(self, smoothing_n=5):
+    def __init__(self, smoothing_n=5, enable_ldw=False, ldw_threshold_m=0.4, beep_on_ldw=False, beep_cooldown_s=1.0):
+        """
+        enable_ldw: enable lane departure warning detection
+        ldw_threshold_m: threshold in meters for offset to trigger a warning
+        beep_on_ldw: try to play beep (requires simpleaudio)
+        beep_cooldown_s: time between beeps to avoid continuous beep
+        """
         self.M = None; self.Minv = None
         self.left_fits = deque(maxlen=smoothing_n)
         self.right_fits = deque(maxlen=smoothing_n)
+        self.enable_ldw = enable_ldw
+        self.ldw_threshold = ldw_threshold_m
+        self.beep_on_ldw = beep_on_ldw and SIMPLEAUDIO_AVAILABLE
+        self.beep_cooldown = beep_cooldown_s
+        self._last_beep_ts = 0.0
 
     def process_frame(self, frame, use_warp=True):
         orig = frame.copy()
@@ -88,4 +121,25 @@ class LaneProcessor:
         overlay = draw_lane_overlay(orig, left_mean, right_mean, ploty, self.Minv)
         offset = measure_vehicle_offset(w, left_mean, right_mean)
         cv2.putText(overlay, f"Offset: {offset:.2f} m", (30,50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255),2)
-        return overlay, {"offset": offset, "ploty": ploty, "leftx": left_mean, "rightx": right_mean}
+
+        info = {"offset": offset, "ploty": ploty, "leftx": left_mean, "rightx": right_mean}
+
+        # LDW logic
+        if self.enable_ldw and offset is not None:
+            # If absolute offset exceeds threshold, trigger warning
+            if abs(offset) > self.ldw_threshold:
+                # Visual warning on overlay
+                txt = "⚠️ LANE DEPARTURE!"
+                cv2.putText(overlay, txt, (30,150), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0,0,255), 3)
+                # beep with cooldown
+                import time
+                now = time.time()
+                if self.beep_on_ldw and (now - self._last_beep_ts) > self.beep_cooldown:
+                    _play_beep()
+                    self._last_beep_ts = now
+                # include flag in info
+                info["ldw"] = True
+            else:
+                info["ldw"] = False
+
+        return overlay, info
