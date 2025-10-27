@@ -16,9 +16,12 @@ from pathlib import Path
 sys.path.append(os.path.dirname(__file__))
 
 import cv2
-from pipeline import LaneProcessor
-from video_processor import VideoProcessor
-from road_classifier import classify_road_type
+# ensure package imports work when running main.py as a module
+# Use absolute imports referencing the package 'src'
+from src.pipeline import LaneProcessor
+from src.video_processor import VideoProcessor
+from src.road_classifier import classify_road_type
+import cv2
 
 def process_image(input_path, output_path=None, use_warp=True, show=True, enable_ldw=False, ldw_threshold=0.4, beep_on_ldw=False):
     img = cv2.imread(input_path)
