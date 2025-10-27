@@ -3,27 +3,31 @@ import numpy as np
 from collections import deque
 from .utils import perspective_matrices, warp, draw_lane_overlay, measure_vehicle_offset
 
-# Try to import simpleaudio for beep. If not present, LDW will be visual-only.
-try:
-    import simpleaudio as sa
-    SIMPLEAUDIO_AVAILABLE = True
-except Exception:
-    SIMPLEAUDIO_AVAILABLE = False
+import platform
+SIMPLEAUDIO_AVAILABLE = False
+_WINSOUND_AVAILABLE = False
+
+# Use winsound on Windows (no install required)
+if platform.system().lower().startswith("win"):
+    try:
+        import winsound
+        _WINSOUND_AVAILABLE = True
+    except Exception:
+        _WINSOUND_AVAILABLE = False
 
 def _play_beep(frequency=880, duration_ms=200, volume=0.3):
-    """Play a short beep (uses simpleaudio if available)."""
-    if not SIMPLEAUDIO_AVAILABLE:
-        return
-    fs = 44100
-    t = np.linspace(0, duration_ms/1000.0, int(fs * (duration_ms/1000.0)), False)
-    tone = np.sin(frequency * t * 2 * np.pi)
-    audio = tone * (2**15 - 1) * volume
-    audio = audio.astype(np.int16)
+    """Play a short beep. Uses winsound on Windows; otherwise no-op."""
     try:
-        play_obj = sa.play_buffer(audio, 1, 2, fs)
-        # don't block; let it play asynchronously
+        if _WINSOUND_AVAILABLE:
+            # winsound.Beep expects frequency (Hz) and duration (ms)
+            winsound.Beep(int(frequency), int(duration_ms))
+        else:
+            # fallback: simple system bell (may be silent on some systems)
+            print("\a", end='', flush=True)
     except Exception:
+        # non-fatal; just skip the sound
         pass
+
 
 def combined_threshold(img):
     hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS)
